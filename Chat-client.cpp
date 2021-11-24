@@ -5,15 +5,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-//
+
 #define SERVERIP   "127.0.0.1"
 #define MULTICASTIP "235.7.8.9"
 #define SERVERPORT 9000
 #define REMOTEPORT 9010
 #define BUFSIZE    512
 
-
-// CRITICAL_SECTION cs;
+int quit_Thread = 1;
 
 
 // 소켓 함수 오류 출력 후 종료
@@ -56,9 +55,11 @@ DWORD WINAPI sendtoThread(LPVOID arg) {
     serveraddr.sin_family = AF_INET;
     serveraddr.sin_port = htons(SERVERPORT);
 
-    while (1) {
+    while (quit_Thread) {
 
         if (fgets(buf, BUFSIZE, stdin) == NULL) break;
+
+        if (quit_Thread == 0) break;
 
         len = strlen(buf);
         if (buf[len - 1] == '\n') {
@@ -77,19 +78,27 @@ DWORD WINAPI recvfromThread(LPVOID arg) {
 
     SOCKET sock = (SOCKET)arg;
     int retval;
-    char buf[BUFSIZE + 1];
+    char buf[BUFSIZE + 13];
+    char* name;
+    char* context;
     SOCKADDR_IN recvaddr;
 
-    while (1) {
+    while (quit_Thread) {
         int addrlen = sizeof(recvaddr);
-        retval = recvfrom(sock, buf, BUFSIZE+3, 0, (SOCKADDR*)&recvaddr, &addrlen);
+        retval = recvfrom(sock, buf, BUFSIZE+13, 0, (SOCKADDR*)&recvaddr, &addrlen);
         if (retval == SOCKET_ERROR) {
             err_display("recvfrom()");
             continue;
         }
         else if (retval > 0) {
             buf[retval - 1] = '\0';
-            printf("[채팅 닉네임] %s\n", buf);
+            name = strtok_s(buf, "\n", &context);
+            printf("[%s] %s\n", name,context);
+            if (!strncmp(context,"fin",3)) {
+                printf("연결종료\n");
+                quit_Thread = 0;
+                break;
+            }
         }
         else if (retval == 0) {
             break;
@@ -144,7 +153,7 @@ int main(int argc, char* argv[])
     // 통신에 필요한 스레드 초기화
     HANDLE SThread[2];
     int namelen;
-    char buf[BUFSIZE+4];
+    char buf[BUFSIZE+1];
     char name[12];
 
     // 서버와 연결 과정
@@ -152,10 +161,11 @@ int main(int argc, char* argv[])
         // 닉네임 입력받기
         printf("[접속 설정] 사용하실 닉네임을 입력해주세요 (1~6자)\n");
         if (fgets(name, 11, stdin) == NULL) continue;
-        //stdin_reset();
-        namelen = strlen(name);
-        name[namelen] = '\0';
         
+        //namelen = strlen(name);
+        //name[namelen-1] = '\0';
+        //stdin_reset();
+
         // 서버에 연결 요청
         strcpy_s(buf, "cnt");
         strcat_s(buf, name);
@@ -166,7 +176,7 @@ int main(int argc, char* argv[])
             err_display("sendto()");
             continue;
         }
-        retval = recvfrom(sock, buf, BUFSIZE+3, 0, (SOCKADDR*)&recvaddr, &addrlen);
+        retval = recvfrom(sock, buf, BUFSIZE+1, 0, (SOCKADDR*)&recvaddr, &addrlen);
         if (retval == SOCKET_ERROR) {
             err_display("recvfrom()");
             continue;
