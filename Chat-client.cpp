@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-
+//
 #define SERVERIP   "127.0.0.1"
 #define MULTICASTIP "235.7.8.9"
 #define SERVERPORT 9000
@@ -14,6 +14,7 @@
 
 
 // CRITICAL_SECTION cs;
+
 
 // 소켓 함수 오류 출력 후 종료
 void err_quit(const char* msg)
@@ -81,7 +82,7 @@ DWORD WINAPI recvfromThread(LPVOID arg) {
 
     while (1) {
         int addrlen = sizeof(recvaddr);
-        retval = recvfrom(sock, buf, BUFSIZE, 0, (SOCKADDR*)&recvaddr, &addrlen);
+        retval = recvfrom(sock, buf, BUFSIZE+3, 0, (SOCKADDR*)&recvaddr, &addrlen);
         if (retval == SOCKET_ERROR) {
             err_display("recvfrom()");
             continue;
@@ -98,7 +99,9 @@ DWORD WINAPI recvfromThread(LPVOID arg) {
     return 0;
 }
 
-
+void stdin_reset() {
+    while (getchar() != '\n');
+}
 
 
 int main(int argc, char* argv[])
@@ -119,14 +122,9 @@ int main(int argc, char* argv[])
     retval = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&optval, sizeof(optval));
     if (retval == SOCKET_ERROR) err_quit("setsockopt()");
 
-    struct ip_mreq mreq;
-    mreq.imr_multiaddr.s_addr = inet_addr(MULTICASTIP);
-    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-    retval = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
-    if (retval == SOCKET_ERROR) err_quit("setsockopt()");
 
     // 클라이언트에서 멀티캐스트를 하기위한 지역 주소 바인딩 
-
+    /*
     SOCKADDR_IN clientaddr;
     ZeroMemory(&clientaddr, sizeof(clientaddr));
     clientaddr.sin_family = AF_INET;
@@ -134,9 +132,52 @@ int main(int argc, char* argv[])
     clientaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     retval = bind(sock, (SOCKADDR*)&clientaddr, sizeof(clientaddr));
     if (retval == SOCKET_ERROR) err_quit("bind()");
+    */
+    SOCKADDR_IN serveraddr;
+    ZeroMemory(&serveraddr, sizeof(serveraddr));
+    serveraddr.sin_addr.s_addr = inet_addr(SERVERIP);
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_port = htons(SERVERPORT);
+    SOCKADDR_IN recvaddr;
+    int addrlen =sizeof(recvaddr);
 
     // 통신에 필요한 스레드 초기화
     HANDLE SThread[2];
+    int namelen;
+    char buf[BUFSIZE+4];
+    char name[12];
+
+    // 서버와 연결 과정
+    while (true) {
+        // 닉네임 입력받기
+        printf("[접속 설정] 사용하실 닉네임을 입력해주세요 (1~6자)\n");
+        if (fgets(name, 11, stdin) == NULL) continue;
+        //stdin_reset();
+        namelen = strlen(name);
+        name[namelen] = '\0';
+        
+        // 서버에 연결 요청
+        strcpy_s(buf, "cnt");
+        strcat_s(buf, name);
+        printf("서버요청 패킷 %s\n", buf);
+
+        retval = sendto(sock, buf, 16 , 0, (SOCKADDR*)&serveraddr, sizeof(serveraddr));
+        if (retval == SOCKET_ERROR) {
+            err_display("sendto()");
+            continue;
+        }
+        retval = recvfrom(sock, buf, BUFSIZE+3, 0, (SOCKADDR*)&recvaddr, &addrlen);
+        if (retval == SOCKET_ERROR) {
+            err_display("recvfrom()");
+            continue;
+        }
+        if (!strcmp(buf, "cntack")) {
+            break;
+        }
+
+        printf("서버 연결 실패 \n");
+    }
+    
 
     printf("***************[채팅 클라이언트 시작]***************\n");
 
@@ -149,10 +190,6 @@ int main(int argc, char* argv[])
 
     // 데이터 송신, 수신 스레드가 모두 종료했을 때
     WaitForMultipleObjects(2, SThread, TRUE, INFINITE);
-
-    // 멀티 캐스트 그룹 탈퇴
-    retval = setsockopt(sock, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
-    if (retval == SOCKET_ERROR) err_quit("setsockopt()");
 
 
     closesocket(sock);
